@@ -73,10 +73,29 @@ int lz_encode(const uint8_t *input, size_t input_size, TokenList *output) {
 }
 
 int lz_decode(const TokenList *tokens, uint8_t *output, size_t output_size) {
-        (void)tokens;
-        (void)output;
-        (void)output_size;
-        return 1;
+
+	size_t out_pos = 0; 
+	// while (out_pos <= output_size) {
+	for (size_t token_index = 0; token_index < tokens->count; token_index++) {
+		Token token = tokens->data[token_index];
+		
+		if (token.kind == TOK_LITERAL && out_pos < output_size) {
+			output[out_pos] = token.literal;
+			out_pos++; 
+		} else if (token.kind == TOK_MATCH && (token.distance > 0 && token.distance <= out_pos) && token.length <= output_size - out_pos) {
+			for (size_t i = 0; i < token.length; i++) {
+				output[out_pos] = output[out_pos - token.distance];
+				out_pos++;
+			}
+		} else {
+			return 1;
+		}
+	}
+
+	if (out_pos != output_size) { 
+		return 1;
+	}
+	return 0;
 }
 
 void tokens_free(TokenList *tokens) {
