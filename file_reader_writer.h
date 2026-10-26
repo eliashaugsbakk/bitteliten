@@ -2,9 +2,10 @@
 #define FILE_READER_WRITER_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 typedef struct {
-        unsigned char *data;
+        uint8_t *data;
         size_t size;
 } Buffer;
 
