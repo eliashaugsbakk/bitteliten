@@ -57,7 +57,7 @@ static int flush(BitWriter *bw) {
         return 0;
 }
 
-/* Read bits into out_bits. Returns 0 on success, -1 on EOF/error. */
+/* Read bits into out_bits. Returns 0 on success, 1 on EOF/error. */
 static int read_bits(BitReader *br, uint64_t *out_bits, unsigned length) {
         uint64_t result = 0;
 
@@ -65,7 +65,7 @@ static int read_bits(BitReader *br, uint64_t *out_bits, unsigned length) {
                 if (br->buffer_pos == 8) {
                         int ch = fgetc(br->file_stream);
                         if (ch == EOF) {
-                                return -1;
+                                return 1;
                         }
                         br->buffer = (uint8_t)ch;
                         br->buffer_pos = 0;
@@ -98,8 +98,7 @@ static void count_frequencies(const TokenList *tokens, uint32_t *literal_match_l
         literal_match_length_freq[SYM_END]++;
 }
 
-static Node *create_node(uint32_t symbol, uint64_t frequency, Node *left,
-                         Node *right) {
+static Node *create_node(uint32_t symbol, uint64_t frequency, Node *left, Node *right) {
         Node *node = malloc(sizeof(*node));
         if (!node) {
                 return NULL;
@@ -144,9 +143,7 @@ static Node *build_huffman_tree(uint32_t *frequencies, size_t alphabet_size) {
         // Initialize one leaf for each symbol with a non-zero frequency.
         for (size_t symbol = 0; symbol < alphabet_size; symbol++) {
                 if (frequencies[symbol] > 0) {
-                        nodes[active_count++] = create_node((uint32_t)symbol,
-                                                            frequencies[symbol],
-                                                            NULL, NULL);
+                        nodes[active_count++] = create_node((uint32_t)symbol, frequencies[symbol], NULL, NULL);
                         if (!nodes[active_count - 1]) {
                                 goto cleanup;
                         }
@@ -322,16 +319,6 @@ static int write_tokens(BitWriter *bw, const TokenList *tokens, const HuffmanCod
         return 0;
 }
 
-static int write_uint64_be(FILE *file, uint64_t value) {
-        for (unsigned shift = 56; ; shift -= 8) {
-                if (fputc((int)(value >> shift) & 0xff, file) == EOF)
-                        return 1;
-                if (shift == 0)
-                        break;
-        }
-        return 0;
-}
-
 /* Huffman compression from TokenList to compressed bits */
 int huff_write(FILE *output_file, const TokenList *tokens, uint64_t original_len) {
         int result = 1;
@@ -382,8 +369,8 @@ int huff_write(FILE *output_file, const TokenList *tokens, uint64_t original_len
         build_codes(litlen_tree, litlen_codes, 0, 0);
         build_codes(dist_tree, dist_codes, 0, 0);
 
-        /* Header: original uncompressed length, stored big-endian. */
-        if (write_uint64_be(output_file, original_len) != 0)
+        /* Header: original uncompressed length. */
+        if (write_bits(&bw, original_len, 64) != 0)
                 goto cleanup;
 
         /* Trees and encoded token stream. */
@@ -416,7 +403,18 @@ cleanup:
 }
 
 /* Huffman decompression from compressed bits to TokenList */
-int huff_read(FILE *output_file, TokenList *output, uint64_t *original_len) {
+int huff_read(FILE *input_file, TokenList *output, uint64_t *original_len) {
         int result = 1;
+
+        if (!input_file || !output || !original_len)
+                return result;
+
+        BitReader br = {.buffer_pos = 8, .file_stream = input_file};
+
+        /* Header: original uncompressed length. */
+        if (read_bits(&br, original_len, 64) != 0)
+                return result;
+
+
         return result;
 }
