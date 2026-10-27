@@ -3,6 +3,24 @@
 #include "codec.h"
 #include <stdlib.h>
 
+enum {
+	HASH_BITS = 15,
+	HASH_SIZE = (1u << HASH_BITS),
+	CHAIN_LIMIT = 128
+};
+
+#define CHAIN_EMPTY SIZE_MAX
+
+static size_t hash_function(const uint8_t *input, size_t pos) {
+	uint32_t hash = 0;
+	for (int i = 0; i < 3; i++) {
+
+		hash += input[pos+i] << i*8; 
+	}
+	return (hash * 0x9E3779B1) >> (32 - HASH_BITS);
+
+}
+
 static int token_pusher(TokenList *tokens, Token token) {
 	if (tokens->count == tokens->capacity) {
 		size_t capacity = (tokens->capacity == 0) ? 1000 : tokens->capacity*2;
@@ -28,6 +46,14 @@ static size_t match_length(const uint8_t *input, size_t current_index, size_t ca
 	}
 	return length;
 }
+
+/*
+int lz_encode(const uint8_t *input, size_t input_size, TokenList *output) {
+	size_t *head = malloc(MAX_DISTANCE * sizeof(uint8_t));
+	size_t *prev = malloc(MAX_DISTANCE * sizeof(uint8_t));
+
+}
+*/
 
 int lz_encode(const uint8_t *input, size_t input_size, TokenList *output) {
 
