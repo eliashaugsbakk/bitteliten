@@ -48,8 +48,9 @@ Buffer *read_file(const char *file_path) {
                 return NULL;
         }
 
+        /* Allocate at least 1 byte, since malloc(0) may return NULL. */
         buf->size = (size_t)bufsize;
-        buf->data = malloc(buf->size);
+        buf->data = malloc(buf->size > 0 ? buf->size : 1);
         if (!buf->data) {
                 perror("Failed to allocate buffer data");
                 free(buf);
@@ -70,21 +71,27 @@ Buffer *read_file(const char *file_path) {
 }
 
 int write_file(const char *file_path, const Buffer *buf) {
-    if (!file_path || !buf) return -1;
+        if (!file_path || !buf)
+                return 1;
 
-    FILE *fp = fopen(file_path, "wb");
-    if (!fp) {
-        perror("Failed to open file for writing");
-        return -1;
-    }
+        FILE *fp = fopen(file_path, "wb");
+        if (!fp) {
+                perror("Failed to open file for writing");
+                return 1;
+        }
 
-    size_t written = fwrite(buf->data, 1, buf->size, fp);
-    if (written != buf->size) {
-        perror("Failed to write complete data");
-        fclose(fp);
-        return -1;
-    }
+        /* fwrite must not get a NULL pointer, even with size 0. */
+        if (buf->size > 0 && fwrite(buf->data, 1, buf->size, fp) != buf->size) {
+                perror("Failed to write complete data");
+                fclose(fp);
+                return 1;
+        }
 
-    fclose(fp);
-    return 0;
+        /* Buffered data is written on close, so errors like a full disk show up here. */
+        if (fclose(fp) != 0) {
+                perror("Failed to close file");
+                return 1;
+        }
+
+        return 0;
 }
