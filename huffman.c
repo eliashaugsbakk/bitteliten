@@ -1,10 +1,11 @@
 /** Huffman in/decoding
  *
- * Takes in a list of "symbols" which may be bigger than 8bit.
+ * Takes in a list of "symbols" wich is stored as 16 bit.
  *
  */
 
 #include "codec.h"
+#include <stdlib.h>
 
 typedef struct {
         uint8_t buffer;
@@ -17,7 +18,6 @@ typedef struct {
         uint8_t buffer_pos;
         FILE *file_stream;
 } BitReader;
-
 
 /* Write bits into BitWriter. Returns 0 on success, 1 on EOF/error. */
 static int write_bits(BitWriter *bw, uint64_t bits, unsigned length) {
@@ -74,6 +74,12 @@ static int flush(BitWriter *bw) {
         return 0;
 }
 
+static void count_frequencies(const SymbolList *symbols, uint32_t *symbol_freq) {
+        for (size_t i = 0; i < symbols->count; i++) {
+                symbol_freq[symbols->data[i]]++;
+        }
+}
+
 int huff_write_symbols(FILE *file, const SymbolList *symbols, int alphabet_size) {
         (void)file;
         (void)symbols;
@@ -82,8 +88,15 @@ int huff_write_symbols(FILE *file, const SymbolList *symbols, int alphabet_size)
 }
 
 int huff_read_symbols(FILE *file, SymbolList *output, int alphabet_size) {
+        uint32_t *symbol_freq = calloc(alphabet_size, sizeof(*symbol_freq));
+        if (symbol_freq == NULL)
+                return 1;
+
+
+
+        free(symbol_freq);
+
         (void)file;
         (void)output;
-        (void)alphabet_size;
         return 1;
 }
