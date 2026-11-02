@@ -50,8 +50,8 @@ static int write_bits(BitWriter *bw, uint64_t bits, unsigned length) {
                         bw->buffer_pos = 0;
                 }
 
-                uint8_t current_bit = (bits >> i) & 1;
-                bw->buffer = bw->buffer | (current_bit << bw->buffer_pos);
+                uint8_t current_bit = (bits >> (length - 1 - i)) & 1;
+                bw->buffer = bw->buffer | (current_bit << (7 - bw->buffer_pos));
 
                 bw->buffer_pos++;
         }
@@ -72,9 +72,9 @@ static int read_bits(BitReader *br, uint64_t *out_bits, unsigned length) {
                         br->buffer_pos = 0;
                 }
 
-                uint64_t current_bit = (br->buffer >> br->buffer_pos) & 1;
+                uint64_t current_bit = (br->buffer >> (7 - br->buffer_pos)) & 1;
 
-                result |= (current_bit << i);
+                result = (result << 1) | current_bit;
 
                 br->buffer_pos++;
         }
