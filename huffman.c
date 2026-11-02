@@ -19,6 +19,18 @@ typedef struct {
         FILE *file_stream;
 } BitReader;
 
+typedef struct Node {
+        uint32_t symbol;
+        uint64_t frequency;
+        struct Node *left;
+        struct Node *right;
+} Node;
+
+typedef struct {
+        uint32_t bits;
+        unsigned length;
+} HuffmanCode;
+
 /* Write bits into BitWriter. Returns 0 on success, 1 on EOF/error. */
 static int write_bits(BitWriter *bw, uint64_t bits, unsigned length) {
         for (unsigned i = 0; i < length; i++) {
@@ -74,10 +86,111 @@ static int flush(BitWriter *bw) {
         return 0;
 }
 
-static void count_frequencies(const SymbolList *symbols, uint32_t *symbol_freq) {
+static void count_frequencies(const SymbolList *symbols, uint64_t *symbol_freq) {
         for (size_t i = 0; i < symbols->count; i++) {
                 symbol_freq[symbols->data[i]]++;
         }
+}
+
+static Node *create_node(uint16_t symbol, uint64_t frequency, Node *left, Node *right) {
+        Node *node = malloc(sizeof(*node));
+        if (!node) {
+                return NULL;
+        }
+
+        node->symbol = symbol;
+        node->frequency = frequency;
+        node->left = left;
+        node->right = right;
+        return node;
+}
+
+static void free_tree(Node *node) {
+        if (!node)
+                return;
+        free_tree(node->left);
+        free_tree(node->right);
+        free(node);
+}
+
+static void free_nodes(Node **nodes, int alphabet_size) {
+        if (!nodes)
+                return;
+        size_t max_nodes = alphabet_size * 2;
+        for (size_t i = 0; i < max_nodes; i++) {
+                if (nodes[i] != NULL) {
+                        free_tree(nodes[i]);
+                        nodes[i] = NULL;
+                }
+        }
+}
+
+static Node *build_huffman_tree(const uint64_t *symbol_freq, int alphabet_size) {
+        // Maximum possible active nodes: leaf nodes plus internal nodes.
+        size_t max_nodes = alphabet_size * 2;
+        Node **nodes = calloc(max_nodes, sizeof(Node *));
+        if (!nodes) {
+                goto cleanup;
+        }
+
+        size_t active_count = 0;
+
+        // Initialize one leaf for each symbol with a non-zero frequency.
+        for (size_t symbol = 0; symbol < alphabet_size; symbol++) {
+                if (symbol_freq[symbol] > 0) {
+                        nodes[active_count++] = create_node((uint32_t)symbol, symbol_freq[symbol], NULL, NULL);
+                        if (!nodes[active_count - 1]) {
+                                goto cleanup;
+                        }
+                }
+        }
+
+        while (active_count > 1) {
+                size_t min1_idx = (size_t)-1;
+                size_t min2_idx = (size_t)-1;
+                uint32_t smallest = UINT32_MAX;
+                uint32_t second_smallest = UINT32_MAX;
+
+                for (size_t j = 0; j < active_count; j++) {
+                        uint32_t freq = nodes[j]->frequency;
+                        if (freq < smallest) {
+                                second_smallest = smallest;
+                                min2_idx = min1_idx;
+                                smallest = freq;
+                                min1_idx = j;
+                        } else if (freq < second_smallest) {
+                                second_smallest = freq;
+                                min2_idx = j;
+                        }
+                }
+
+                Node *parent = create_node(0, smallest + second_smallest, nodes[min1_idx], nodes[min2_idx]);
+                if (!parent) {
+                        goto cleanup;
+                }
+
+                size_t high = (min1_idx > min2_idx) ? min1_idx : min2_idx;
+                size_t low = (min1_idx > min2_idx) ? min2_idx : min1_idx;
+
+                nodes[high] = nodes[active_count - 1];
+                nodes[active_count - 1] = NULL;
+                active_count--;
+
+                nodes[low] = nodes[active_count - 1];
+                nodes[active_count - 1] = NULL;
+                active_count--;
+
+                nodes[active_count++] = parent;
+        }
+
+        Node *root = nodes[0];
+        free(nodes);
+        return root;
+
+cleanup:
+        free_nodes(nodes, alphabet_size);
+        free(nodes);
+        return NULL;
 }
 
 int huff_write_symbols(FILE *file, const SymbolList *symbols, int alphabet_size) {
@@ -91,8 +204,6 @@ int huff_read_symbols(FILE *file, SymbolList *output, int alphabet_size) {
         uint32_t *symbol_freq = calloc(alphabet_size, sizeof(*symbol_freq));
         if (symbol_freq == NULL)
                 return 1;
-
-
 
         free(symbol_freq);
 
