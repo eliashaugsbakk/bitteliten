@@ -44,8 +44,8 @@ int zero_run_decode(const SymbolList *symbols, uint8_t *output, size_t output_si
 /* Huffman */
 
 /* Writes one block of symbols, including its own table. */
-int huff_write_symbols(FILE *file, const SymbolList *symbols, int alphabet_size);
+int huff_write_symbols(FILE *file, const SymbolList *symbols);
 /* Reads one block written by huff_write_symbols. */
-int huff_read_symbols(FILE *file, SymbolList *output, int alphabet_size);
+int huff_read_symbols(FILE *file, SymbolList *output);
 
 #endif
