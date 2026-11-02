@@ -1,11 +1,14 @@
 /** Huffman in/decoding
  *
- * Takes in a list of "symbols" wich is stored as 16 bit.
+ * Takes in or returns a list of "symbols" wich is stored as 16 bit.
+ *
+ * Uses cononical huffman to minimize the header size.
  *
  */
 
 #include "codec.h"
 #include <stdlib.h>
+#include <string.h>
 
 typedef struct {
         uint8_t buffer;
@@ -136,7 +139,7 @@ static Node *build_huffman_tree(const uint64_t *symbol_freq, int alphabet_size) 
         size_t active_count = 0;
 
         // Initialize one leaf for each symbol with a non-zero frequency.
-        for (size_t symbol = 0; symbol < alphabet_size; symbol++) {
+        for (int symbol = 0; symbol < alphabet_size; symbol++) {
                 if (symbol_freq[symbol] > 0) {
                         nodes[active_count++] = create_node((uint32_t)symbol, symbol_freq[symbol], NULL, NULL);
                         if (!nodes[active_count - 1]) {
@@ -191,6 +194,61 @@ cleanup:
         free_nodes(nodes, alphabet_size);
         free(nodes);
         return NULL;
+}
+
+static void build_code_lengths(const Node *node, uint8_t *lengths, unsigned depth) {
+        if (node == NULL)
+                return;
+
+        if (node->left == NULL && node->right == NULL) {
+                lengths[node->symbol] = depth == 0 ? 1 : depth;
+                return;
+        }
+
+        if (node->left != NULL)
+                build_code_lengths(node->left, lengths, depth + 1);
+
+        if (node->right != NULL)
+                build_code_lengths(node->right, lengths, depth + 1);
+}
+
+static void build_canonical_codes(const uint8_t *lengths, HuffmanCode *codes, int alphabet_size) {
+        uint32_t count[alphabet_size + 1];
+        uint32_t next_code[alphabet_size + 1];
+        unsigned max_length = 0;
+
+        memset(count, 0, sizeof(count));
+        memset(next_code, 0, sizeof(next_code));
+
+        for (int symbol = 0; symbol < alphabet_size; symbol++) {
+                codes[symbol] = (HuffmanCode){0};
+
+                if (lengths[symbol] == 0)
+                        continue;
+
+                if (lengths[symbol] > max_length)
+                        max_length = lengths[symbol];
+
+                count[lengths[symbol]]++;
+        }
+
+        uint32_t code = 0;
+
+        for (unsigned length = 1; length <= max_length; length++) {
+                code = (code + count[length - 1]) << 1;
+                next_code[length] = code;
+        }
+
+        for (int symbol = 0; symbol < alphabet_size; symbol++) {
+                unsigned length = lengths[symbol];
+
+                if (length == 0)
+                        continue;
+
+                codes[symbol].bits = next_code[length];
+                codes[symbol].length = length;
+                next_code[length]++;
+        }
 }
 
 int huff_write_symbols(FILE *file, const SymbolList *symbols, int alphabet_size) {
