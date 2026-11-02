@@ -261,6 +261,19 @@ static int write_code_lengths(BitWriter *writer, const uint8_t *lengths) {
         return 0;
 }
 
+static int read_code_lengths(BitReader *reader, uint8_t *lengths) {
+        for (size_t symbol = 0; symbol < BWT_ALPHABET_SIZE; symbol++) {
+                uint64_t length;
+
+                if (read_bits(reader, &length, 6) != 0)
+                        return 1;
+
+                lengths[symbol] = (uint8_t)length;
+        }
+
+        return 0;
+}
+
 static int write_encoded_symbols(BitWriter *writer, const SymbolList *symbols, const HuffmanCode *codes) {
         for (size_t i = 0; i < symbols->count; i++) {
                 uint16_t symbol = symbols->data[i];
@@ -304,13 +317,17 @@ int huff_write_symbols(FILE *file, const SymbolList *symbols) {
 }
 
 int huff_read_symbols(FILE *file, SymbolList *output) {
-        uint64_t *frequencies = calloc(BWT_ALPHABET_SIZE, sizeof(*frequencies));
-        if (frequencies == NULL)
+        uint8_t lengths[BWT_ALPHABET_SIZE] = {0};
+        HuffmanCode codes[BWT_ALPHABET_SIZE] = {0};
+        BitReader reader = {
+            .buffer_pos = 8,
+            .file_stream = file,
+        };
+
+        if (read_code_lengths(&reader, lengths) != 0)
                 return 1;
 
-        free(frequencies);
+        build_canonical_codes(lengths, codes);
 
-        (void)file;
-        (void)output;
         return 1;
 }
