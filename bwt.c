@@ -63,3 +63,54 @@ int bwt_forward(const uint8_t *input, size_t size, uint8_t *output, uint32_t *pr
 	free(start_positions);
 	return 0; 
 }
+
+int bwt_inverse(const uint8_t *input, size_t size, uint32_t primary_index, uint8_t *output) {
+	if (size == 0) {
+		return 0;
+	}
+
+	if (primary_index >= size) {
+		return 1;
+	}
+
+	size_t count[256] = {0};
+
+	for (size_t i = 0; i < size; i++) {
+		count[input[i]]++;
+	}
+
+	size_t start[256] = {0};
+
+	size_t sum = 0; 
+	for (size_t i = 0; i < 256; i++) {
+		start[i] = sum; 
+		sum += count[i];
+	}
+
+	uint32_t *jump = malloc(sizeof(uint32_t)*size);
+
+	if (jump == NULL) {
+		return 1;
+	}
+
+	size_t seen[256] = {0};
+
+	for (size_t i = 0; i < size; i++) {
+		uint8_t	byte = input[i];
+		jump[i] = start[byte] + seen[byte];
+		seen[byte]++;
+	}
+
+
+	size_t p = primary_index;
+	for (size_t i = 0; i < size; i++) {
+		output[size - 1 -i] = input[p];
+		p = jump[p];
+	}
+
+	free(jump);
+	return 0;
+
+
+}
+
