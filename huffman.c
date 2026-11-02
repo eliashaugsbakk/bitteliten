@@ -4,9 +4,15 @@
  *
  * Uses cononical huffman to minimize the header size.
  *
+ * File format:
+ *   - 258 code lengths, six bits per length where zero means unused symbol)
+ *   - canonical Huffman-coded symbols
+ *   - the symbol list includes BWT_EOB and the remaining final bits are padding
+ *
  */
 
 #include "codec.h"
+#include <stddef.h>
 #include <stdlib.h>
 
 typedef struct {
@@ -22,7 +28,7 @@ typedef struct {
 } BitReader;
 
 typedef struct Node {
-        uint32_t symbol;
+        uint16_t symbol;
         uint64_t frequency;
         struct Node *left;
         struct Node *right;
@@ -88,9 +94,9 @@ static int flush(BitWriter *bw) {
         return 0;
 }
 
-static void count_frequencies(const SymbolList *symbols, uint64_t *symbol_freq) {
+static void count_frequencies(const SymbolList *symbols, uint64_t *frequencies) {
         for (size_t i = 0; i < symbols->count; i++) {
-                symbol_freq[symbols->data[i]]++;
+                frequencies[symbols->data[i]]++;
         }
 }
 
@@ -127,7 +133,7 @@ static void free_nodes(Node **nodes) {
         }
 }
 
-static Node *build_huffman_tree(const uint64_t *symbol_freq) {
+static Node *build_huffman_tree(const uint64_t *frequencies) {
         // Maximum possible active nodes: leaf nodes plus internal nodes.
         size_t max_nodes = BWT_ALPHABET_SIZE * 2;
         Node **nodes = calloc(max_nodes, sizeof(Node *));
@@ -138,9 +144,9 @@ static Node *build_huffman_tree(const uint64_t *symbol_freq) {
         size_t active_count = 0;
 
         // Initialize one leaf for each symbol with a non-zero frequency.
-        for (int symbol = 0; symbol < BWT_ALPHABET_SIZE; symbol++) {
-                if (symbol_freq[symbol] > 0) {
-                        nodes[active_count++] = create_node((uint32_t)symbol, symbol_freq[symbol], NULL, NULL);
+        for (size_t symbol = 0; symbol < BWT_ALPHABET_SIZE; symbol++) {
+                if (frequencies[symbol] > 0) {
+                        nodes[active_count++] = create_node((uint16_t)symbol, frequencies[symbol], NULL, NULL);
                         if (!nodes[active_count - 1]) {
                                 goto cleanup;
                         }
@@ -150,18 +156,18 @@ static Node *build_huffman_tree(const uint64_t *symbol_freq) {
         while (active_count > 1) {
                 size_t min1_idx = (size_t)-1;
                 size_t min2_idx = (size_t)-1;
-                uint32_t smallest = UINT32_MAX;
-                uint32_t second_smallest = UINT32_MAX;
+                uint64_t smallest = UINT64_MAX;
+                uint64_t second_smallest = UINT64_MAX;
 
                 for (size_t j = 0; j < active_count; j++) {
-                        uint32_t freq = nodes[j]->frequency;
-                        if (freq < smallest) {
+                        uint64_t frequency = nodes[j]->frequency;
+                        if (frequency < smallest) {
                                 second_smallest = smallest;
                                 min2_idx = min1_idx;
-                                smallest = freq;
+                                smallest = frequency;
                                 min1_idx = j;
-                        } else if (freq < second_smallest) {
-                                second_smallest = freq;
+                        } else if (frequency < second_smallest) {
+                                second_smallest = frequency;
                                 min2_idx = j;
                         }
                 }
@@ -216,7 +222,7 @@ static void build_canonical_codes(const uint8_t *lengths, HuffmanCode *codes) {
         uint32_t next_code[BWT_ALPHABET_SIZE + 1] = {0};
         unsigned max_length = 0;
 
-        for (int symbol = 0; symbol < BWT_ALPHABET_SIZE; symbol++) {
+        for (size_t symbol = 0; symbol < BWT_ALPHABET_SIZE; symbol++) {
                 codes[symbol] = (HuffmanCode){0};
 
                 if (lengths[symbol] == 0)
@@ -235,7 +241,7 @@ static void build_canonical_codes(const uint8_t *lengths, HuffmanCode *codes) {
                 next_code[length] = code;
         }
 
-        for (int symbol = 0; symbol < BWT_ALPHABET_SIZE; symbol++) {
+        for (size_t symbol = 0; symbol < BWT_ALPHABET_SIZE; symbol++) {
                 unsigned length = lengths[symbol];
 
                 if (length == 0)
@@ -247,18 +253,62 @@ static void build_canonical_codes(const uint8_t *lengths, HuffmanCode *codes) {
         }
 }
 
+static int write_code_lengths(BitWriter *writer, const uint8_t *lengths) {
+        for (size_t i = 0; i < BWT_ALPHABET_SIZE; i++) {
+                if (write_bits(writer, lengths[i], 6) != 0)
+                        return 1;
+        }
+        return 0;
+}
+
+static int write_encoded_symbols(BitWriter *writer, const SymbolList *symbols, const HuffmanCode *codes) {
+        for (size_t i = 0; i < symbols->count; i++) {
+                uint16_t symbol = symbols->data[i];
+                HuffmanCode code = codes[symbol];
+
+                if (write_bits(writer, code.bits, code.length) != 0)
+                        return 1;
+        }
+        return 0;
+}
+
 int huff_write_symbols(FILE *file, const SymbolList *symbols) {
-        (void)file;
-        (void)symbols;
-        return 1;
+        uint64_t frequencies[BWT_ALPHABET_SIZE] = {0};
+        uint8_t lengths[BWT_ALPHABET_SIZE] = {0};
+        HuffmanCode codes[BWT_ALPHABET_SIZE] = {0};
+
+        count_frequencies(symbols, frequencies);
+
+        Node *tree = build_huffman_tree(frequencies);
+        if (tree == NULL)
+                return 1;
+
+        build_code_lengths(tree, lengths, 0);
+        build_canonical_codes(lengths, codes);
+
+        BitWriter writer = {
+            .buffer_pos = 0,
+            .file_stream = file,
+        };
+        int result = 0;
+
+        if (write_code_lengths(&writer, lengths) != 0)
+                result = 1;
+        else if (write_encoded_symbols(&writer, symbols, codes) != 0)
+                result = 1;
+        else if (flush(&writer) != 0)
+                result = 1;
+
+        free_tree(tree);
+        return result;
 }
 
 int huff_read_symbols(FILE *file, SymbolList *output) {
-        uint32_t *symbol_freq = calloc(BWT_ALPHABET_SIZE, sizeof(*symbol_freq));
-        if (symbol_freq == NULL)
+        uint64_t *frequencies = calloc(BWT_ALPHABET_SIZE, sizeof(*frequencies));
+        if (frequencies == NULL)
                 return 1;
 
-        free(symbol_freq);
+        free(frequencies);
 
         (void)file;
         (void)output;
