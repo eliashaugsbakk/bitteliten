@@ -5,14 +5,16 @@
  * Uses cononical huffman to minimize the header size.
  *
  * File format:
- *   - 258 code lengths, six bits per length where zero means unused symbol)
+ *   - six bits per length where zero means unused symbol)
  *   - canonical Huffman-coded symbols
  *   - the symbol list includes BWT_EOB and the remaining final bits are padding
+ *   - run length encoding on zero length symbols where benefitial
  *
  */
 
 #include "codec.h"
 #include <stddef.h>
+#include <stdint.h>
 #include <stdlib.h>
 
 typedef struct {
@@ -277,7 +279,7 @@ static int write_code_lengths(BitWriter *writer, const uint8_t *lengths) {
                 // we are working with 6 bits a time. RLE marker is the highest 6 bit value 63.
                 // the overhead of RLE is 6 bits, so it is benefitial for three in a row or more:
                 //      0, 0, 0, 0 -> 63, 4
-                
+
                 while (remaining >= 3) {
                         // using RLE
                         size_t chunk = remaining > 63 ? 63 : remaining;
@@ -287,7 +289,6 @@ static int write_code_lengths(BitWriter *writer, const uint8_t *lengths) {
 
                         remaining -= chunk;
                 }
-
 
                 while (remaining > 0) {
                         // RLE does not prove benefitial
@@ -303,15 +304,33 @@ static int write_code_lengths(BitWriter *writer, const uint8_t *lengths) {
 }
 
 static int read_code_lengths(BitReader *reader, uint8_t *lengths) {
-        for (size_t symbol = 0; symbol < BWT_ALPHABET_SIZE; symbol++) {
+        size_t symbol = 0;
+        while (symbol < BWT_ALPHABET_SIZE) {
                 uint64_t length;
 
                 if (read_bits(reader, &length, 6) != 0)
                         return 1;
 
-                lengths[symbol] = (uint8_t)length;
-        }
+                if (length != 63) {
+                        // No RLE
+                        lengths[symbol++] = (uint8_t)length;
+                        continue;
+                }
 
+                // RLE!! :))
+                uint64_t run_length;
+
+                if (read_bits(reader, &run_length, 6) != 0)
+                        return 1;
+
+                // error if it tries to write past the lengths[258] array
+                if (run_length == 0 || run_length > BWT_ALPHABET_SIZE - symbol)
+                        return 1;
+
+                for (size_t i = 0; i < run_length; i++) {
+                        lengths[symbol++] = 0;
+                }
+        }
         return 0;
 }
 
