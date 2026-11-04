@@ -5,14 +5,16 @@
  * Uses cononical huffman to minimize the header size.
  *
  * File format:
- *   - 258 code lengths, six bits per length where zero means unused symbol)
+ *   - six bits per length where zero means unused symbol)
  *   - canonical Huffman-coded symbols
  *   - the symbol list includes BWT_EOB and the remaining final bits are padding
+ *   - run length encoding on zero length symbols where benefitial
  *
  */
 
 #include "codec.h"
 #include <stddef.h>
+#include <stdint.h>
 #include <stdlib.h>
 
 typedef struct {
@@ -254,23 +256,81 @@ static void build_canonical_codes(const uint8_t *lengths, HuffmanCode *codes) {
 }
 
 static int write_code_lengths(BitWriter *writer, const uint8_t *lengths) {
-        for (size_t i = 0; i < BWT_ALPHABET_SIZE; i++) {
-                if (write_bits(writer, lengths[i], 6) != 0)
-                        return 1;
+        size_t i = 0;
+
+        while (i < BWT_ALPHABET_SIZE) {
+                // Run length encoding(RLE) on symbols that do not appear in the huffman table
+                if (lengths[i] != 0) {
+                        // no RLE
+                        if (write_bits(writer, lengths[i], 6) != 0)
+                                return 1;
+                        i++;
+                        continue;
+                }
+                // potential RLE
+                size_t run_length = 0;
+                // count the number of zeros in a row
+                while (i + run_length < BWT_ALPHABET_SIZE && lengths[i + run_length] == 0) {
+                        run_length++;
+                }
+
+                size_t remaining = run_length;
+
+                // we are working with 6 bits a time. RLE marker is the highest 6 bit value 63.
+                // the overhead of RLE is 6 bits, so it is benefitial for three in a row or more:
+                //      0, 0, 0, 0 -> 63, 4
+
+                while (remaining >= 3) {
+                        // using RLE
+                        size_t chunk = remaining > 63 ? 63 : remaining;
+
+                        if (write_bits(writer, 63, 6) != 0 || write_bits(writer, chunk, 6) != 0)
+                                return 1;
+
+                        remaining -= chunk;
+                }
+
+                while (remaining > 0) {
+                        // RLE does not prove benefitial
+                        if (write_bits(writer, 0, 6) != 0)
+                                return 1;
+                        remaining--;
+                }
+
+                i += run_length;
         }
+
         return 0;
 }
 
 static int read_code_lengths(BitReader *reader, uint8_t *lengths) {
-        for (size_t symbol = 0; symbol < BWT_ALPHABET_SIZE; symbol++) {
+        size_t symbol = 0;
+        while (symbol < BWT_ALPHABET_SIZE) {
                 uint64_t length;
 
                 if (read_bits(reader, &length, 6) != 0)
                         return 1;
 
-                lengths[symbol] = (uint8_t)length;
-        }
+                if (length != 63) {
+                        // No RLE
+                        lengths[symbol++] = (uint8_t)length;
+                        continue;
+                }
 
+                // RLE!! :))
+                uint64_t run_length;
+
+                if (read_bits(reader, &run_length, 6) != 0)
+                        return 1;
+
+                // error if it tries to write past the lengths[258] array
+                if (run_length == 0 || run_length > BWT_ALPHABET_SIZE - symbol)
+                        return 1;
+
+                for (size_t i = 0; i < run_length; i++) {
+                        lengths[symbol++] = 0;
+                }
+        }
         return 0;
 }
 
@@ -351,13 +411,15 @@ int huff_read_symbols(FILE *file, SymbolList *output) {
 
                 int found = 0;
                 for (size_t symbol = 0; symbol < BWT_ALPHABET_SIZE; symbol++) {
-                        if (codes[symbol].length != bit_count ||
-                            codes[symbol].bits != bits)
+                        if (codes[symbol].length != bit_count || codes[symbol].bits != bits)
                                 continue;
 
                         found = 1;
-                        if (symbol == BWT_EOB)
+                        if (symbol == BWT_EOB) {
+                                if (symbols_push(output, (uint16_t)symbol) != 0)
+                                        return 1;
                                 return 0;
+                        }
 
                         if (symbols_push(output, (uint16_t)symbol) != 0)
                                 return 1;
