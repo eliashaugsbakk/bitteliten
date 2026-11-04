@@ -254,10 +254,51 @@ static void build_canonical_codes(const uint8_t *lengths, HuffmanCode *codes) {
 }
 
 static int write_code_lengths(BitWriter *writer, const uint8_t *lengths) {
-        for (size_t i = 0; i < BWT_ALPHABET_SIZE; i++) {
-                if (write_bits(writer, lengths[i], 6) != 0)
-                        return 1;
+        size_t i = 0;
+
+        while (i < BWT_ALPHABET_SIZE) {
+                // Run length encoding(RLE) on symbols that do not appear in the huffman table
+                if (lengths[i] != 0) {
+                        // no RLE
+                        if (write_bits(writer, lengths[i], 6) != 0)
+                                return 1;
+                        i++;
+                        continue;
+                }
+                // potential RLE
+                size_t run_length = 0;
+                // count the number of zeros in a row
+                while (i + run_length < BWT_ALPHABET_SIZE && lengths[i + run_length] == 0) {
+                        run_length++;
+                }
+
+                size_t remaining = run_length;
+
+                // we are working with 6 bits a time. RLE marker is the highest 6 bit value 63.
+                // the overhead of RLE is 6 bits, so it is benefitial for three in a row or more:
+                //      0, 0, 0, 0 -> 63, 4
+                
+                while (remaining >= 3) {
+                        // using RLE
+                        size_t chunk = remaining > 63 ? 63 : remaining;
+
+                        if (write_bits(writer, 63, 6) != 0 || write_bits(writer, chunk, 6) != 0)
+                                return 1;
+
+                        remaining -= chunk;
+                }
+
+
+                while (remaining > 0) {
+                        // RLE does not prove benefitial
+                        if (write_bits(writer, 0, 6) != 0)
+                                return 1;
+                        remaining--;
+                }
+
+                i += run_length;
         }
+
         return 0;
 }
 
