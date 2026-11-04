@@ -5,58 +5,47 @@
 #include <stdint.h>
 #include <stdio.h>
 
+/* Symbols */
+
+/* Output of zero-run coding. MTF value v (1..255) becomes symbol v + 1. */
 enum {
-        MIN_MATCH = 3,
-        MAX_MATCH = 258
+        BWT_RUNA = 0,
+        BWT_RUNB = 1,
+        BWT_EOB = 257,
+        BWT_ALPHABET_SIZE = 258
 };
 
-#define MAX_DISTANCE (1u << 15)
-
-/* Tokens */
-
-typedef enum {
-        TOK_LITERAL = 0,
-        TOK_MATCH = 1
-} TokenKind;
-
 typedef struct {
-        uint8_t kind;
-        uint8_t literal;   /* only for literals */
-        uint16_t length;   /* only for matches */
-        uint32_t distance; /* only for matches */
-} Token;
-
-typedef struct {
-        Token *data;
+        uint16_t *data;
         size_t count;
         size_t capacity;
-} TokenList;
+} SymbolList;
 
-void tokens_free(TokenList *tokens);
+int symbols_push(SymbolList *symbols, uint16_t symbol);
+void symbols_free(SymbolList *symbols);
 
-/* Symbol mapping */
+/* BWT */
 
-#define SYM_END 256
+enum {
+        BWT_BLOCK_SIZE = 900000
+};
 
-int sym_litlen_alphabet_size(void);
-int sym_dist_alphabet_size(void);
+/* All functions handle one block of at most BWT_BLOCK_SIZE bytes. */
+int bwt_forward(const uint8_t *input, size_t size, uint8_t *output, uint32_t *primary_index);
+int bwt_inverse(const uint8_t *input, size_t size, uint32_t primary_index, uint8_t *output);
 
-int sym_length(unsigned length);
-unsigned sym_length_base(int symbol);
-unsigned sym_length_extra_bits(int symbol);
+void mtf_encode(const uint8_t *input, size_t size, uint8_t *output);
+void mtf_decode(const uint8_t *input, size_t size, uint8_t *output);
 
-int sym_distance(unsigned distance);
-unsigned sym_distance_base(int symbol);
-unsigned sym_distance_extra_bits(int symbol);
-
-/* LZ */
-
-int lz_encode(const uint8_t *input, size_t input_size, TokenList *output);
-int lz_decode(const TokenList *tokens, uint8_t *output, size_t output_size);
+/* Appends the symbols for one block to output, ending with BWT_EOB. */
+int zero_run_encode(const uint8_t *input, size_t size, SymbolList *output);
+int zero_run_decode(const SymbolList *symbols, uint8_t *output, size_t output_size);
 
 /* Huffman */
 
-int huff_write(FILE *file, const TokenList *tokens, uint64_t original_len);
-int huff_read(FILE *file, TokenList *output, uint64_t *original_len);
+/* Writes one block of symbols, including its own table. */
+int huff_write_symbols(FILE *file, const SymbolList *symbols, int alphabet_size);
+/* Reads one block written by huff_write_symbols. */
+int huff_read_symbols(FILE *file, SymbolList *output, int alphabet_size);
 
 #endif
