@@ -329,5 +329,45 @@ int huff_read_symbols(FILE *file, SymbolList *output) {
 
         build_canonical_codes(lengths, codes);
 
-        return 1;
+        unsigned max_length = 0;
+        for (size_t symbol = 0; symbol < BWT_ALPHABET_SIZE; symbol++) {
+                if (codes[symbol].length > max_length)
+                        max_length = codes[symbol].length;
+        }
+
+        if (max_length > 32)
+                return 1;
+
+        uint32_t bits = 0;
+        unsigned bit_count = 0;
+
+        while (1) {
+                uint64_t bit;
+                if (read_bits(&reader, &bit, 1) != 0)
+                        return 1;
+
+                bits = (bits << 1) | (uint32_t)bit;
+                bit_count++;
+
+                int found = 0;
+                for (size_t symbol = 0; symbol < BWT_ALPHABET_SIZE; symbol++) {
+                        if (codes[symbol].length != bit_count ||
+                            codes[symbol].bits != bits)
+                                continue;
+
+                        found = 1;
+                        if (symbol == BWT_EOB)
+                                return 0;
+
+                        if (symbols_push(output, (uint16_t)symbol) != 0)
+                                return 1;
+
+                        bits = 0;
+                        bit_count = 0;
+                        break;
+                }
+
+                if (!found && bit_count == max_length)
+                        return 1;
+        }
 }

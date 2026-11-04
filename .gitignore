@@ -1,6 +1,9 @@
 # Output file
 bitteliten
 
+# Local Huffman development test
+/huffman_test.c
+
 # Prerequisites
 *.d
 
