@@ -351,13 +351,15 @@ int huff_read_symbols(FILE *file, SymbolList *output) {
 
                 int found = 0;
                 for (size_t symbol = 0; symbol < BWT_ALPHABET_SIZE; symbol++) {
-                        if (codes[symbol].length != bit_count ||
-                            codes[symbol].bits != bits)
+                        if (codes[symbol].length != bit_count || codes[symbol].bits != bits)
                                 continue;
 
                         found = 1;
-                        if (symbol == BWT_EOB)
+                        if (symbol == BWT_EOB) {
+                                if (symbols_push(output, (uint16_t)symbol) != 0)
+                                        return 1;
                                 return 0;
+                        }
 
                         if (symbols_push(output, (uint16_t)symbol) != 0)
                                 return 1;
