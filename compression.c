@@ -1,3 +1,19 @@
+/** Compression and decompression pipeline
+ *
+ * Program flow:
+ *      Compression
+ *      - read the source file and split it into blocks
+ *      - apply the Burrows-Wheeler transform to each block
+ *      - mft-encode the transformed symbols and zero-run encode them
+ *      - Huffman-encode the symbol stream and write block metadata
+ *
+ *      Decompression
+ *      - read each block header and Huffman-decode the payload
+ *      - undo zero-run and MTF encoding
+ *      - invert the BWT transform using the stored primary index
+ *      - write each reconstructed block to the output fiel
+ */
+
 #include "compression.h"
 #include "file_reader_writer.h"
 #include "codec.h"
