@@ -1,21 +1,37 @@
-/** Huffman in/decoding
+/** Huffman en/decoding
  *
- * Takes in or returns a list of "symbols" wich is stored as 16 bit.
+ * Uses canonical Huffman coding. Huffman tree determines code lengths, and
+ * codes are assigned by length and symbol order. Only code lengths are stored to the file.
  *
- * Uses cononical huffman to minimize the header size.
+ * File format of compressed data:
+ *      - code lengths for the symbol alphabet are stored as 5-bit values
+ *              (smallest functioning for diverse.lyx and enwik8.txt)
+ *      - runs of three or more lengths of zero are RLE-encoded to minimize header
+ *      - canonical Huffman-coded symbols, with the BWT_EOB symbol marking the ending
+ *      - Padding to fill the final bits in the last byte when needed
  *
- * File format:
- *   - six bits per length where zero means unused symbol)
- *   - canonical Huffman-coded symbols
- *   - the symbol list includes BWT_EOB and the remaining final bits are padding
- *   - run length encoding on zero length symbols where benefitial
+ * Program flow:
+ *      Compression
+ *      - count symbol frequencies
+ *      - Build a Huffman tree and get a code length for each symbol which is used
+ *      - Assign canonical codes based on those lengths
+ *      - write the lengths, then the encoded symbols
  *
+ *      Decompression
+ *      - Read the code lengths and rebuild the canonical codes
+ *      - Decode symbols until BWT_EOB
  */
 
 #include "codec.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
+
+enum {
+        HUFFMAN_CODE_LENGTH_BITS = 5,
+        HUFFMAN_RLE_MARKER = (1U << HUFFMAN_CODE_LENGTH_BITS) - 1,
+        HUFFMAN_MAX_CODE_LENGTH = 32
+};
 
 typedef struct {
         uint8_t buffer;
@@ -262,7 +278,9 @@ static int write_code_lengths(BitWriter *writer, const uint8_t *lengths) {
                 // Run length encoding(RLE) on symbols that do not appear in the huffman table
                 if (lengths[i] != 0) {
                         // no RLE
-                        if (write_bits(writer, lengths[i], 6) != 0)
+                        if (lengths[i] > HUFFMAN_MAX_CODE_LENGTH || lengths[i] >= HUFFMAN_RLE_MARKER)
+                                return 1;
+                        if (write_bits(writer, lengths[i], HUFFMAN_CODE_LENGTH_BITS) != 0)
                                 return 1;
                         i++;
                         continue;
@@ -276,15 +294,12 @@ static int write_code_lengths(BitWriter *writer, const uint8_t *lengths) {
 
                 size_t remaining = run_length;
 
-                // we are working with 6 bits a time. RLE marker is the highest 6 bit value 63.
-                // the overhead of RLE is 6 bits, so it is benefitial for three in a row or more:
-                //      0, 0, 0, 0 -> 63, 4
-
                 while (remaining >= 3) {
-                        // using RLE
-                        size_t chunk = remaining > 63 ? 63 : remaining;
+                        // using RLE :=)
+                        size_t chunk = remaining > HUFFMAN_RLE_MARKER ? HUFFMAN_RLE_MARKER : remaining;
 
-                        if (write_bits(writer, 63, 6) != 0 || write_bits(writer, chunk, 6) != 0)
+                        if (write_bits(writer, HUFFMAN_RLE_MARKER, HUFFMAN_CODE_LENGTH_BITS) != 0 ||
+                            write_bits(writer, chunk, HUFFMAN_CODE_LENGTH_BITS) != 0)
                                 return 1;
 
                         remaining -= chunk;
@@ -292,7 +307,7 @@ static int write_code_lengths(BitWriter *writer, const uint8_t *lengths) {
 
                 while (remaining > 0) {
                         // RLE does not prove benefitial
-                        if (write_bits(writer, 0, 6) != 0)
+                        if (write_bits(writer, 0, HUFFMAN_CODE_LENGTH_BITS) != 0)
                                 return 1;
                         remaining--;
                 }
@@ -308,11 +323,13 @@ static int read_code_lengths(BitReader *reader, uint8_t *lengths) {
         while (symbol < BWT_ALPHABET_SIZE) {
                 uint64_t length;
 
-                if (read_bits(reader, &length, 6) != 0)
+                if (read_bits(reader, &length, HUFFMAN_CODE_LENGTH_BITS) != 0)
                         return 1;
 
-                if (length != 63) {
+                if (length != HUFFMAN_RLE_MARKER) {
                         // No RLE
+                        if (length > HUFFMAN_MAX_CODE_LENGTH)
+                                return 1;
                         lengths[symbol++] = (uint8_t)length;
                         continue;
                 }
@@ -320,7 +337,7 @@ static int read_code_lengths(BitReader *reader, uint8_t *lengths) {
                 // RLE!! :))
                 uint64_t run_length;
 
-                if (read_bits(reader, &run_length, 6) != 0)
+                if (read_bits(reader, &run_length, HUFFMAN_CODE_LENGTH_BITS) != 0)
                         return 1;
 
                 // error if it tries to write past the lengths[258] array
@@ -395,7 +412,7 @@ int huff_read_symbols(FILE *file, SymbolList *output) {
                         max_length = codes[symbol].length;
         }
 
-        if (max_length > 32)
+        if (max_length > HUFFMAN_MAX_CODE_LENGTH)
                 return 1;
 
         uint32_t bits = 0;
